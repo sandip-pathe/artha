@@ -13,3 +13,4 @@ gen-lang-client-*.json
 .mypy_cache/
 .pytest_cache/
 .DS_Store
+_workspace/
