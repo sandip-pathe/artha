@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+.venv/
+venv/
+.env
+secrets/
+*.service-account.json
+gen-lang-client-*.json
+.alembic/
+.mypy_cache/
+.pytest_cache/
+.DS_Store

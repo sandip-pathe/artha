@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+psycopg2-binary
+httpx
+openai
+google-cloud-vision
+pillow
+python-dotenv
+python-multipart
+pydantic
+pytest
