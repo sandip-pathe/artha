@@ -37,9 +37,14 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    try:
+    def _init_schema() -> None:
         ensure_artha_schema(engine)
         Base.metadata.create_all(bind=engine)
+
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_init_schema), timeout=12)
+    except asyncio.TimeoutError:
+        logger.warning("Database schema initialization timed out; continuing startup")
     except Exception:
         logger.exception("Database schema initialization skipped at startup")
 
