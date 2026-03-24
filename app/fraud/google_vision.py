@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from google.cloud import vision
-
 
 def _extract_text_sync(image_bytes: bytes) -> str:
+    from google.cloud import vision
+    
     client = vision.ImageAnnotatorClient()
     image = vision.Image(content=image_bytes)
     response = client.annotate_image(
@@ -27,6 +27,8 @@ def _extract_text_sync(image_bytes: bytes) -> str:
 
 
 def _dominant_rgb_sync(image_bytes: bytes) -> tuple[int, int, int] | None:
+    from google.cloud import vision
+    
     client = vision.ImageAnnotatorClient()
     image = vision.Image(content=image_bytes)
     response = client.annotate_image(

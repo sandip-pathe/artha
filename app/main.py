@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 
-from app.agent import run_artha, search_payment
+from app.agent import run_artha, run_artha_streaming, search_payment
 from app.db.bootstrap import ensure_artha_schema
 from app.db.models import Base, ProcessedWebhookMessages
 from app.db.session import SessionLocal, engine
 from app.fraud.google_vision import extract_text
+from app.metrics import metrics_store
+from app.orchestration import run_langgraph_chat, stream_langgraph_chat
+from app.realtime_ws import realtime_ws_handler
 from app.sessions import (
     append_conversation_pair,
     get_or_create_session,
@@ -34,6 +41,15 @@ app = FastAPI(title="Artha")
 logger = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.on_event("startup")
 async def on_startup() -> None:
@@ -51,20 +67,27 @@ async def on_startup() -> None:
 
 async def _safe_send_message(phone: str, text: str) -> None:
     try:
+        logger.info(f"[SEND_MSG_START] phone={phone}, text='{text[:40]}...'")
         await send_message(phone, text)
+        logger.info(f"[SEND_MSG_OK] Successfully sent to {phone}")
     except Exception:
-        logger.exception("Failed to send WhatsApp text reply")
+        logger.exception(f"[SEND_MSG_FAIL] Failed to send WhatsApp text reply to {phone}")
 
 
 async def _safe_send_voice(phone: str, text: str) -> None:
-    audio = await synthesize_voice(text)
-    if not audio:
-        await _safe_send_message(phone, text)
-        return
     try:
+        logger.info(f"[SEND_VOICE_START] phone={phone}, text='{text[:40]}...'")
+        audio = await synthesize_voice(text)
+        if not audio:
+            logger.warning(f"[SEND_VOICE_FALLBACK] No audio generated for {phone}, falling back to text")
+            await _safe_send_message(phone, text)
+            return
+        logger.info(f"[SEND_VOICE_AUDIO_OK] Generated audio, uploading...")
         await send_voice_message(phone, audio)
+        logger.info(f"[SEND_VOICE_OK] Successfully sent voice to {phone}")
     except Exception:
-        logger.exception("Failed to send WhatsApp voice reply")
+        logger.exception(f"[SEND_VOICE_FAIL] Failed to send WhatsApp voice reply to {phone}")
+        logger.info(f"[SEND_VOICE_FALLBACK_FAIL] Attempting text fallback to {phone}")
         await _safe_send_message(phone, text)
 
 
@@ -124,18 +147,24 @@ def _register_inbound_message_id(message_id: str | None, phone: str | None) -> b
 
 
 async def _send_output(phone: str, input_type: str, intent: str, response_text: str) -> None:
+    logger.info(f"[SEND_OUTPUT_START] phone={phone}, intent={intent}, text_len={len(response_text)}")
     output_mode = should_reply_with_voice(input_type=input_type, response_text=response_text, intent=intent)
+    logger.info(f"[OUTPUT_MODE] phone={phone}, mode={output_mode}")
 
     if output_mode == "voice":
+        logger.info(f"[SEND_VOICE_PATH] Sending voice response to {phone}")
         await _safe_send_voice(phone, response_text)
         return
 
     if output_mode == "both":
+        logger.info(f"[SEND_BOTH_PATH] Sending voice + text to {phone}")
         await _safe_send_voice(phone, response_text)
         await _safe_send_message(phone, response_text)
         return
 
+    logger.info(f"[SEND_TEXT_PATH] Sending text response to {phone}")
     await _safe_send_message(phone, response_text)
+    logger.info(f"[SEND_OUTPUT_DONE] Completed sending to {phone}")
 
 
 async def _schedule_payment_recheck(phone: str, txn_ref: str, amount: float | None) -> None:
@@ -178,6 +207,7 @@ async def process_message(
     text_body: str | None = None,
     media_id: str | None = None,
 ) -> None:
+    logger.info(f"[MSG_PROCESS_START] phone={phone}, type={message_type}")
     now = datetime.now(IST)
     current_hour = now.hour
     is_evening = current_hour >= 19
@@ -185,6 +215,7 @@ async def process_message(
     with SessionLocal() as db:
         get_or_create_session(db, phone)
         session_context = get_session_context(db, phone)
+        logger.info(f"[MSG_SESSION_RETRIEVED] phone={phone}, has_history={bool(session_context.get('conversation_history'))}")
 
         last_message_date = session_context.get("last_message_date")
         today_str = now.date().isoformat()
@@ -249,6 +280,7 @@ async def process_message(
             input_type = "text"
 
         history = list(session_context.get("conversation_history", []))
+        logger.info(f"[MSG_AGENT_START] phone={phone}, input_len={len(input_text)}")
 
         result = await run_artha(
             merchant_phone=phone,
@@ -263,6 +295,7 @@ async def process_message(
 
         response_text = result.get("response_text", "Thoda busy hoon abhi, ek minute mein try karo ���")
         intent = result.get("intent", "OUT_OF_SCOPE")
+        logger.info(f"[MSG_AGENT_DONE] phone={phone}, intent={intent}, response_len={len(response_text)}")
 
         append_conversation_pair(db, phone, input_text, response_text)
         session_context = get_session_context(db, phone)
@@ -286,7 +319,9 @@ async def process_message(
                 )
                 _launch_background_task(_schedule_payment_recheck(phone, txn_ref, payment_meta.get("amount")))
 
+    logger.info(f"[MSG_SEND_OUTPUT_START] phone={phone}")
     await _send_output(phone, input_type=input_type, intent=intent, response_text=response_text)
+    logger.info(f"[MSG_PROCESS_DONE] phone={phone}")
 
 
 @app.get("/webhook")
@@ -304,21 +339,155 @@ async def verify_webhook(
 @app.post("/webhook")
 async def webhook_handler(request: Request) -> JSONResponse:
     payload = await request.json()
+    logger.info(f"[WEBHOOK_IN] Received payload: {payload}")
+    
     message = _extract_message(payload)
     if not message:
+        logger.warning("[WEBHOOK_ABORT] Could not extract message from payload")
         return JSONResponse({"status": "ok"})
 
     phone = message.get("from")
     if not phone:
+        logger.warning("[WEBHOOK_ABORT] No 'from' field in message")
         return JSONResponse({"status": "ok"})
 
     message_id = message.get("id")
+    logger.info(f"[WEBHOOK_MSG] phone={phone}, message_id={message_id}")
+    
     if not _register_inbound_message_id(message_id=message_id, phone=phone):
+        logger.warning(f"[WEBHOOK_DEDUP] Message already processed: {message_id}")
         return JSONResponse({"status": "ok", "deduped": True})
 
     message_type, text_body, media_id = _extract_message_type_data(message)
+    logger.info(f"[WEBHOOK_TYPE] type={message_type}, text={text_body}, media_id={media_id}")
+    
+    logger.info(f"[WEBHOOK_LAUNCH_BG] Starting background task for phone={phone}")
     _launch_background_task(process_message(phone=phone, message_type=message_type, text_body=text_body, media_id=media_id))
+    logger.info(f"[WEBHOOK_RETURN] 200 OK for phone={phone}")
     return JSONResponse({"status": "ok"})
+
+
+@app.post("/test-message")
+async def test_message(
+    phone: str,
+    message: str,
+    mode: str = "frontend",
+) -> JSONResponse:
+    """Test endpoint for frontend to send messages without WhatsApp webhook"""
+    logger.info(f"[TEST_MSG] phone={phone}, mode={mode}, text='{message[:50]}...'")
+    
+    if mode == "whatsapp":
+        logger.info("[TEST_MSG] WhatsApp mode not yet enabled - treating as frontend simulation")
+    
+    _launch_background_task(
+        process_message(
+            phone=phone,
+            message_type="text",
+            text_body=message,
+            media_id=None,
+        )
+    )
+    
+    return JSONResponse({
+        "status": "ok",
+        "message": "Test message queued for processing",
+        "phone": phone,
+        "mode": mode,
+    })
+
+
+@app.get("/api/context/{phone}")
+async def api_get_context(phone: str):
+    with SessionLocal() as db:
+        session_context = get_session_context(db, phone)
+        return {
+            "total_sales": 12500,
+            "transactions": 14,
+            "history": session_context.get("conversation_history", [])
+        }
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(file: UploadFile = File(...)):
+    audio_bytes = await file.read()
+    mime_type = file.content_type
+    transcript = await transcribe_voice(audio_bytes, mime_type)
+    return {"transcript": transcript}
+
+
+@app.post("/api/upload-image")
+async def api_upload_image(file: UploadFile = File(...)):
+    image_bytes = await file.read()
+    extracted = await extract_text(image_bytes)
+    return {"ocr_text": extracted}
+
+
+@app.post("/api/chat")
+async def api_chat(
+    phone: str = Form(...),
+    message: str = Form(...),
+    input_type: str = Form("text"),
+    ocr_text: str | None = Form(None)
+):
+    result = await run_langgraph_chat(
+        phone=phone,
+        message=message,
+        input_type=input_type,
+        ocr_text=ocr_text,
+        session_id=phone,
+    )
+
+    with SessionLocal() as db:
+        append_conversation_pair(db, phone, message, result.get("response_text", ""))
+
+    return {
+        "response_text": result.get("response_text"),
+        "intent": result.get("intent"),
+        "tools_called": result.get("tools_called", []),
+        "node_timings_ms": result.get("node_timings_ms", {}),
+        "cache_hit": result.get("cache_hit", False),
+    }
+
+
+class ChatStreamRequest(BaseModel):
+    phone: str
+    message: str
+    input_type: str = "text"
+    ocr_text: str | None = None
+
+
+@app.post("/api/chat-stream")
+async def api_chat_stream(req: ChatStreamRequest):
+    async def event_generator():
+        aggregated = ""
+        async for event in stream_langgraph_chat(
+            phone=req.phone,
+            message=req.message,
+            input_type=req.input_type,
+            ocr_text=req.ocr_text,
+            session_id=req.phone,
+        ):
+            if event.get("type") == "chunk":
+                aggregated += event.get("content", "")
+            yield f"data: {json.dumps(event, ensure_ascii=True)}\n\n"
+
+        with SessionLocal() as db:
+            append_conversation_pair(db, req.phone, req.message, aggregated.strip())
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.websocket("/api/realtime/ws")
+async def api_realtime_ws(websocket: WebSocket):
+    await realtime_ws_handler(websocket)
+
+
+@app.post("/api/tts")
+async def api_tts(text: str = Form(...)):
+    audio = await synthesize_voice(text)
+    if audio:
+        return {"audio": base64.b64encode(audio).decode("utf-8")}
+    return {"audio": None}
 
 
 @app.get("/health")
@@ -337,6 +506,12 @@ async def health() -> dict:
         "db_connected": db_connected,
         "version": "Artha 1.0",
     }
+
+
+@app.get("/metrics")
+async def metrics(limit: int = 200) -> dict:
+    records = await metrics_store.latest(limit=limit)
+    return {"count": len(records), "records": records}
 
 
 @app.get("/demo", response_class=HTMLResponse)

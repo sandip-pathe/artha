@@ -31,7 +31,7 @@ def test_payment_verify_found_demo_transaction() -> None:
     with SessionLocal() as db:
         result = asyncio.run(
             run_artha(
-                merchant_phone="919876543210",
+                merchant_phone="918767394523",
                 user_input="image bheja hai",
                 input_type="image",
                 ocr_text="Txn ID T260321153045DEMO0001\nAmount INR 450",
@@ -48,7 +48,7 @@ def test_payment_verify_missing_transaction_sets_recheck() -> None:
     with SessionLocal() as db:
         result = asyncio.run(
             run_artha(
-                merchant_phone="919876543210",
+                merchant_phone="918767394523",
                 user_input="image bheja hai",
                 input_type="image",
                 ocr_text="Txn ID T260321153045DEMO9999\nAmount INR 450",
@@ -101,7 +101,7 @@ def test_webhook_dedupes_same_message_id(monkeypatch) -> None:
                             "messages": [
                                 {
                                     "id": "wamid.TEST123",
-                                    "from": "919876543210",
+                                    "from": "918767394523",
                                     "type": "text",
                                     "text": {"body": "hello"},
                                 }

@@ -12,7 +12,7 @@ from app.db.session import SessionLocal, engine
 
 
 DEMO_MERCHANT_PHONE = "918767394523"
-LEGACY_DEMO_MERCHANT_PHONE = "919876543210"
+LEGACY_DEMO_MERCHANT_PHONE = "918767394523"
 
 
 CUSTOMERS: list[dict[str, str]] = [

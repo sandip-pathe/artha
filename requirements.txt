@@ -11,3 +11,8 @@ python-dotenv
 python-multipart
 pydantic
 pytest
+deepgram-sdk
+langgraph
+langchain-openai
+redis
+websockets
