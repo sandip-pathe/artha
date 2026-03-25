@@ -32,6 +32,8 @@ Optional:
 - `GOOGLE_APPLICATION_CREDENTIALS` (only if using Google Vision service account file path)
 - `WHATSAPP_PAYTM_TEMPLATE`
 - `WHATSAPP_TEMPLATE_LANG`
+- `CORS_ALLOW_ORIGINS` (comma-separated, e.g. `https://artha-nu.vercel.app`)
+- `CORS_ALLOW_ORIGIN_REGEX` (default supports `https://*.vercel.app`)
 
 ## Run Locally
 

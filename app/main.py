@@ -41,10 +41,20 @@ app = FastAPI(title="Artha")
 logger = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# Enable CORS for frontend
+def _csv_env_list(name: str) -> list[str]:
+    raw = os.getenv(name, "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# Enable CORS for local + deployed frontend origins.
+_default_cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_configured_cors_origins = _csv_env_list("CORS_ALLOW_ORIGINS")
+_cors_origin_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_default_cors_origins + _configured_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
