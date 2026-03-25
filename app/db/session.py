@@ -7,9 +7,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/payguard")
+DATABASE_URL = (os.getenv("DATABASE_URL", "") or "").strip()
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://") :]
+
+if not DATABASE_URL:
+    # Do not silently point to localhost in cloud runtimes.
+    DATABASE_URL = "sqlite:///./payguard_fallback.db"
 
 engine_kwargs: dict = {
     "future": True,

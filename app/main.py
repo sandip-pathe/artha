@@ -61,8 +61,8 @@ async def on_startup() -> None:
         await asyncio.wait_for(asyncio.to_thread(_init_schema), timeout=12)
     except asyncio.TimeoutError:
         logger.warning("Database schema initialization timed out; continuing startup")
-    except Exception:
-        logger.exception("Database schema initialization skipped at startup")
+    except Exception as exc:
+        logger.warning("Database schema initialization skipped at startup: %s", exc)
 
 
 async def _safe_send_message(phone: str, text: str) -> None:
