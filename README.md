@@ -39,6 +39,18 @@ Optional:
 c:/x/pay-gaurd/.venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --env-file .env
 ```
 
+Windows PowerShell helper script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev_backend.ps1
+```
+
+Optional custom port:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev_backend.ps1 -Port 8011
+```
+
 Health check:
 
 ```bash
