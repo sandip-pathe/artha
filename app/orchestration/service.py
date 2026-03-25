@@ -379,11 +379,13 @@ async def _build_graph_once():
 
     checkpointer = None
     if AsyncRedisSaver is not None:
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        try:
-            checkpointer = AsyncRedisSaver.from_conn_string(redis_url)
-        except Exception:
-            checkpointer = None
+        redis_url = (os.getenv("REDIS_URL", "") or "").strip()
+        # Only enable Redis checkpointing when an explicit REDIS_URL is provided.
+        if redis_url:
+            try:
+                checkpointer = AsyncRedisSaver.from_conn_string(redis_url)
+            except Exception:
+                checkpointer = None
 
     _graph = builder.compile(checkpointer=checkpointer)
     return _graph
@@ -462,7 +464,11 @@ async def _stream_response_text(state: GraphState) -> AsyncIterator[ChatStreamEv
 async def _run_graph(state: GraphState) -> GraphState:
     graph = await _build_graph_once()
     session_id = state.get("session_id") or str(uuid.uuid4())
-    out = await graph.ainvoke(state, config={"configurable": {"thread_id": session_id}})
+    timeout_s = float(os.getenv("ARTHA_GRAPH_TIMEOUT_SECONDS", "20"))
+    out = await asyncio.wait_for(
+        graph.ainvoke(state, config={"configurable": {"thread_id": session_id}}),
+        timeout=timeout_s,
+    )
     return out
 
 
@@ -536,7 +542,25 @@ async def run_langgraph_chat(
         "ocr_text": ocr_text,
         "node_timings_ms": {},
     }
-    graph_out = await _run_graph(state)
+    try:
+        graph_out = await _run_graph(state)
+    except asyncio.TimeoutError:
+        return {
+            "response_text": "System slow chal raha hai. 30 second baad phir try karo.",
+            "intent": "timeout",
+            "tools_called": [],
+            "node_timings_ms": {},
+            "cache_hit": False,
+        }
+    except Exception:
+        logger.exception("run_langgraph_chat failed")
+        return {
+            "response_text": "Abhi system issue aa gaya. Ek baar phir try karo.",
+            "intent": "error",
+            "tools_called": [],
+            "node_timings_ms": {},
+            "cache_hit": False,
+        }
 
     fmt_start = time.perf_counter()
     response_text = await _format_response_text(graph_out)
@@ -623,7 +647,15 @@ async def stream_langgraph_chat(
         "node_timings_ms": {},
     }
 
-    graph_out = await _run_graph(state)
+    try:
+        graph_out = await _run_graph(state)
+    except asyncio.TimeoutError:
+        yield {"type": "error", "content": "System slow chal raha hai. 30 second baad phir try karo."}
+        return
+    except Exception:
+        logger.exception("stream_langgraph_chat failed")
+        yield {"type": "error", "content": "Abhi system issue aa gaya. Ek baar phir try karo."}
+        return
     for event in graph_out.get("tool_results") or []:
         yield {"type": "tool_call", "name": str(event.get("name") or ""), "args": json.dumps(event.get("args") or {}, ensure_ascii=True)}
         yield {"type": "tool_result", "result": json.dumps(event.get("result") or {}, ensure_ascii=True)}

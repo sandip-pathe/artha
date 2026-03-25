@@ -479,6 +479,11 @@ async def api_chat_stream(req: ChatStreamRequest):
         ):
             if event.get("type") == "chunk":
                 aggregated += event.get("content", "")
+            elif event.get("type") == "error":
+                # Keep frontend behavior simple: convert stream errors into visible text chunks.
+                content = event.get("content") or "Abhi system issue aa gaya. Ek baar phir try karo."
+                aggregated += content
+                event = {"type": "chunk", "content": content}
             yield f"data: {json.dumps(event, ensure_ascii=True)}\n\n"
 
         with SessionLocal() as db:
