@@ -64,8 +64,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup() -> None:
     def _init_schema() -> None:
-        ensure_artha_schema(engine)
         Base.metadata.create_all(bind=engine)
+        ensure_artha_schema(engine)
 
     try:
         await asyncio.wait_for(asyncio.to_thread(_init_schema), timeout=12)

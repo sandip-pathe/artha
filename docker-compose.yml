@@ -3,7 +3,22 @@ version: "3.9"
 services:
   redis:
     image: redis:7-alpine
-    container_name: artha-redis
+    container_name: payguard-redis
     ports:
       - "6379:6379"
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: payguard-postgres
+    environment:
+      POSTGRES_USER: artha
+      POSTGRES_PASSWORD: artha_password
+      POSTGRES_DB: artha_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
