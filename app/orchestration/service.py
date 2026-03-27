@@ -97,6 +97,8 @@ _INTENT_PLANNER_PROMPT = (
     "Available tools:\n"
     f"{_tool_description_blob()}\n"
     "Rules:\n"
+    "- If the user says hello, asks about you, or is just chatting/onboarding, set confidence to 1.0, intent object to 'general', and tools_required to [].\n"
+    "- If the intent is unclear or ambiguous regarding a business task, set confidence < 0.7 and provide a clarification_question.\n"
     "- Do not hallucinate unavailable tools.\n"
     "- Prefer concise plans.\n"
     "- response_format in: voice,text,table,chart\n"
