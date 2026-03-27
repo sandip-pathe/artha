@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from app.agent import run_artha_streaming
 from app.db.bootstrap import ensure_artha_schema
 from app.db.models import Base
+from app.db.seed import seed
 from app.db.session import SessionLocal, engine
 from app.fraud.google_vision import extract_text
 from app.metrics import metrics_store
@@ -56,6 +57,10 @@ async def on_startup() -> None:
     def _init_schema() -> None:
         Base.metadata.create_all(bind=engine)
         ensure_artha_schema(engine)
+        try:
+            seed()
+        except Exception as e:
+            logger.warning("Database seeding failed: %s", e)
 
     try:
         await asyncio.wait_for(asyncio.to_thread(_init_schema), timeout=12)
