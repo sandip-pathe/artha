@@ -81,8 +81,8 @@ class FraudReports(Base):
     merchant: Mapped[Merchants] = relationship("Merchants", back_populates="fraud_reports")
 
 
-class WhatsappSessions(Base):
-    __tablename__ = "whatsapp_sessions"
+class ChatSessions(Base):
+    __tablename__ = "chat_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     phone: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)

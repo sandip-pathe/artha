@@ -115,7 +115,7 @@ def _persist_fraud_check(
 
 	record = FraudChecks(
 		merchant_id=merchant.id,
-		image_path="whatsapp-media",
+		image_path="uploaded-media",
 		verdict=verdict,
 		confidence=confidence,
 		layers_flagged=layers_flagged,

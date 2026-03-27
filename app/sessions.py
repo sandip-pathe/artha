@@ -3,15 +3,15 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import WhatsappSessions
+from app.db.models import ChatSessions
 
 
-def get_or_create_session(db: Session, phone: str) -> tuple[WhatsappSessions, bool]:
-	session = db.scalar(select(WhatsappSessions).where(WhatsappSessions.phone == phone))
+def get_or_create_session(db: Session, phone: str) -> tuple[ChatSessions, bool]:
+	session = db.scalar(select(ChatSessions).where(ChatSessions.phone == phone))
 	if session:
 		return session, False
 
-	session = WhatsappSessions(phone=phone, state="NEW", context_json={})
+	session = ChatSessions(phone=phone, state="NEW", context_json={})
 	db.add(session)
 	db.commit()
 	db.refresh(session)
@@ -28,7 +28,7 @@ def set_pending_more(db: Session, phone: str, pending_text: str) -> None:
 
 
 def pop_pending_more(db: Session, phone: str) -> str | None:
-	session = db.scalar(select(WhatsappSessions).where(WhatsappSessions.phone == phone))
+	session = db.scalar(select(ChatSessions).where(ChatSessions.phone == phone))
 	if not session:
 		return None
 
@@ -77,7 +77,7 @@ def set_pending_recheck(db: Session, phone: str, pending: dict | None) -> None:
 
 
 def get_pending_recheck(db: Session, phone: str) -> dict | None:
-	session = db.scalar(select(WhatsappSessions).where(WhatsappSessions.phone == phone))
+	session = db.scalar(select(ChatSessions).where(ChatSessions.phone == phone))
 	if not session:
 		return None
 	context_json = dict(session.context_json or {})
